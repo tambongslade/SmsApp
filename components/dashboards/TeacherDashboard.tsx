@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,16 +8,111 @@ import {
   SafeAreaView,
   StatusBar,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { User } from '../LoginScreen';
+import { BASE_URL } from '../../constants';
 
 interface TeacherDashboardProps {
   user: User;
+  token: string;
   onLogout: () => void;
-  onNavigate: (screen: string) => void;
+  onNavigate: (screen: string, params?: any) => void;
 }
 
-const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, onLogout }) => {
+interface TeacherDashboardStats {
+  assignedSubjects: number;
+  totalStudents: number;
+  totalClasses: number;
+  weeklyPeriods: number;
+  marksToEnter: number;
+  upcomingPeriods: number;
+}
+
+interface MyClass {
+  id: string;
+  name: string;
+  subject: string;
+  students: number;
+}
+
+interface SubjectWithSubclasses {
+  id: number;
+  name: string;
+  subclasses: {
+    id: number;
+    name: string;
+    className: string;
+    studentCount: number;
+  }[];
+}
+
+const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, token, onLogout, onNavigate }) => {
+  const [stats, setStats] = useState<TeacherDashboardStats | null>(null);
+  const [myClasses, setMyClasses] = useState<MyClass[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        const statsResponse = await fetch(`${BASE_URL}/api/v1/teachers/me/dashboard`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!statsResponse.ok) {
+          throw new Error(`Failed to fetch dashboard stats: ${statsResponse.status}`);
+        }
+        const statsData = await statsResponse.json();
+        setStats(statsData.data);
+        
+        const subjectsResponse = await fetch(`${BASE_URL}/api/v1/teachers/me/subjects`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!subjectsResponse.ok) {
+          throw new Error(`Failed to fetch subjects: ${subjectsResponse.status}`);
+        }
+
+        const subjectsData = await subjectsResponse.json();
+        if (subjectsData.success && Array.isArray(subjectsData.data)) {
+            const formattedClasses: MyClass[] = [];
+            subjectsData.data.forEach((subject: SubjectWithSubclasses) => {
+              if (subject.subclasses && Array.isArray(subject.subclasses)) {
+                subject.subclasses.forEach(subclass => {
+                  formattedClasses.push({
+                    id: subclass.id.toString(),
+                    name: `${subclass.className} ${subclass.name}`,
+                    subject: subject.name,
+                    students: subclass.studentCount
+                  });
+                });
+              }
+            });
+            setMyClasses(formattedClasses);
+        } else {
+            setMyClasses([]);
+        }
+
+      } catch (e: any) {
+        setError(e.message || 'An unknown error occurred');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchData();
+  }, [token]);
+
   const handleLogout = () => {
     Alert.alert(
       'Logout',
@@ -29,40 +124,36 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, onLogout }) =
     );
   };
 
-  const teachingStats = {
-    totalStudents: 145,
-    classes: 6,
-    subjects: 3,
-    pendingMarks: 28,
-    attendance: 92,
-    upcomingExams: 2,
-  };
-
-  const myClasses = [
-    { id: '1', name: 'Grade 10-A', subject: 'Mathematics', students: 25, time: '08:00 AM' },
-    { id: '2', name: 'Grade 10-B', subject: 'Mathematics', students: 28, time: '09:00 AM' },
-    { id: '3', name: 'Grade 11-A', subject: 'Physics', students: 22, time: '11:00 AM' },
-    { id: '4', name: 'Grade 11-B', subject: 'Physics', students: 24, time: '02:00 PM' },
-    { id: '5', name: 'Grade 9-A', subject: 'Science', students: 26, time: '03:00 PM' },
-    { id: '6', name: 'Grade 9-B', subject: 'Science', students: 20, time: '04:00 PM' },
-  ];
-
   const quickActions = [
-    { id: '1', title: 'Take Attendance', icon: '📋', color: '#2ecc71', description: 'Mark student attendance' },
-    { id: '2', title: 'Enter Marks', icon: '📝', color: '#3498db', description: 'Record student grades' },
-    { id: '3', title: 'Create Questions', icon: '❓', color: '#9b59b6', description: 'Exam question bank' },
-    { id: '4', title: 'View Students', icon: '👥', color: '#f39c12', description: 'Student information' },
-    { id: '5', title: 'Assignments', icon: '📚', color: '#e67e22', description: 'Homework & projects' },
-    { id: '6', title: 'Messages', icon: '📧', color: '#1abc9c', description: 'Parent communication' },
+    { id: '1', title: 'My Classes', icon: '🏫', color: '#2ecc71', description: 'View and manage classes', screen: 'TeacherClasses' },
+    { id: '2', title: 'Exams & Marks', icon: '📝', color: '#3498db', description: 'Submit marks and grades', screen: 'TeacherExams' },
+    { id: '4', title: 'Settings', icon: '⚙️', color: '#f39c12', description: 'Profile and preferences', screen: 'TeacherSettings' },
   ];
 
-  const todaySchedule = [
-    { time: '08:00 AM', class: 'Grade 10-A', subject: 'Mathematics', room: 'Room 205' },
-    { time: '09:00 AM', class: 'Grade 10-B', subject: 'Mathematics', room: 'Room 205' },
-    { time: '11:00 AM', class: 'Grade 11-A', subject: 'Physics', room: 'Lab 301' },
-    { time: '02:00 PM', class: 'Grade 11-B', subject: 'Physics', room: 'Lab 301' },
-  ];
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#3498db" />
+          <Text style={styles.loadingText}>Loading Dashboard...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <Text style={styles.errorText}>Error: {error}</Text>
+          <TouchableOpacity onPress={onLogout}>
+            <Text style={styles.logoutText}>Logout</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
+  
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#3498db" />
@@ -79,26 +170,30 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, onLogout }) =
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
         {/* Teaching Overview */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Teaching Overview</Text>
           <View style={styles.statsGrid}>
             <View style={[styles.statCard, { backgroundColor: '#2ecc71' }]}>
-              <Text style={styles.statNumber}>{teachingStats.totalStudents}</Text>
+              <Text style={styles.statNumber}>{stats?.totalStudents ?? 'N/A'}</Text>
               <Text style={styles.statLabel}>Total Students</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: '#3498db' }]}>
-              <Text style={styles.statNumber}>{teachingStats.classes}</Text>
+              <Text style={styles.statNumber}>{stats?.totalClasses ?? 'N/A'}</Text>
               <Text style={styles.statLabel}>Classes</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: '#f39c12' }]}>
-              <Text style={styles.statNumber}>{teachingStats.pendingMarks}</Text>
+              <Text style={styles.statNumber}>{stats?.marksToEnter ?? 'N/A'}</Text>
               <Text style={styles.statLabel}>Pending Marks</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: '#9b59b6' }]}>
-              <Text style={styles.statNumber}>{teachingStats.attendance}%</Text>
-              <Text style={styles.statLabel}>Avg Attendance</Text>
+              <Text style={styles.statNumber}>{stats?.weeklyPeriods ?? 'N/A'}</Text>
+              <Text style={styles.statLabel}>Weekly Periods</Text>
             </View>
           </View>
         </View>
@@ -106,23 +201,10 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, onLogout }) =
         {/* Today's Schedule */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Today's Schedule</Text>
-          {todaySchedule.map((schedule, index) => (
-            <TouchableOpacity key={index} style={styles.scheduleCard}>
-              <View style={styles.scheduleTime}>
-                <Text style={styles.timeText}>{schedule.time}</Text>
-              </View>
-              <View style={styles.scheduleDetails}>
-                <Text style={styles.scheduleClass}>{schedule.class}</Text>
-                <Text style={styles.scheduleSubject}>{schedule.subject}</Text>
-                <Text style={styles.scheduleRoom}>📍 {schedule.room}</Text>
-              </View>
-              <View style={styles.scheduleActions}>
-                <TouchableOpacity style={styles.actionButton}>
-                  <Text style={styles.actionButtonText}>📋</Text>
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          ))}
+          <View style={styles.emptyStateCard}>
+            <Text style={styles.emptyStateText}>📅</Text>
+            <Text style={styles.emptyStateMessage}>Today's schedule is not available at the moment.</Text>
+          </View>
         </View>
 
         {/* Quick Actions */}
@@ -133,7 +215,7 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, onLogout }) =
               <TouchableOpacity
                 key={action.id}
                 style={[styles.actionCard, { borderTopColor: action.color }]}
-                onPress={() => Alert.alert(action.title, action.description)}
+                onPress={() => onNavigate(action.screen, { user, token })}
               >
                 <Text style={styles.actionIcon}>{action.icon}</Text>
                 <Text style={styles.actionTitle}>{action.title}</Text>
@@ -146,16 +228,22 @@ const TeacherDashboard: React.FC<TeacherDashboardProps> = ({ user, onLogout }) =
         {/* My Classes */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>My Classes</Text>
-          {myClasses.map((classItem) => (
-            <TouchableOpacity key={classItem.id} style={styles.classCard}>
-              <View style={styles.classHeader}>
-                <Text style={styles.className}>{classItem.name}</Text>
-                <Text style={styles.classTime}>{classItem.time}</Text>
-              </View>
-              <Text style={styles.classSubject}>{classItem.subject}</Text>
-              <Text style={styles.classStudents}>👥 {classItem.students} Students</Text>
-            </TouchableOpacity>
-          ))}
+          {myClasses.length > 0 ? (
+            myClasses.map((classItem) => (
+              <TouchableOpacity key={classItem.id} style={styles.classCard}>
+                <View style={styles.classHeader}>
+                  <Text style={styles.className}>{classItem.name}</Text>
+                </View>
+                <Text style={styles.classSubject}>{classItem.subject}</Text>
+                <Text style={styles.classStudents}>👥 {classItem.students} Students</Text>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <View style={styles.emptyStateCard}>
+              <Text style={styles.emptyStateText}>📚</Text>
+              <Text style={styles.emptyStateMessage}>You are not assigned to any classes.</Text>
+            </View>
+          )}
         </View>
 
         {/* Recent Activity */}
@@ -183,6 +271,28 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#2c3e50',
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#e74c3c',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  logoutText: {
+    color: '#3498db',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   header: {
     backgroundColor: '#3498db',
@@ -224,6 +334,9 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 20,
+  },
+  scrollContent: {
+    paddingBottom: 100, // Space for bottom navigation
   },
   section: {
     marginBottom: 25,
@@ -405,6 +518,27 @@ const styles = StyleSheet.create({
   activityText: {
     fontSize: 14,
     color: '#2c3e50',
+  },
+  emptyStateCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.05,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  emptyStateText: {
+    fontSize: 40,
+    marginBottom: 10,
+  },
+  emptyStateMessage: {
+    fontSize: 14,
+    color: '#7f8c8d',
+    textAlign: 'center',
   },
 });
 

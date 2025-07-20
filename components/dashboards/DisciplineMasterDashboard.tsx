@@ -1,801 +1,584 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
+  ScrollView,
   TouchableOpacity,
   StyleSheet,
   SafeAreaView,
   StatusBar,
-  ScrollView,
-  Modal,
-  TextInput,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
+  Dimensions,
 } from 'react-native';
 import { User } from '../LoginScreen';
+import { useDisciplineMaster } from '../DisciplineMasterContext';
 
-interface DisciplinaryIncident {
-  id: string;
-  studentName: string;
-  studentClass: string;
-  incidentType: 'minor' | 'major' | 'severe';
-  description: string;
-  location: string;
-  reportedBy: string;
-  timestamp: string;
-  status: 'reported' | 'investigating' | 'resolved' | 'escalated';
-  actionTaken?: string;
+const { width } = Dimensions.get('window');
+
+// API Response Interfaces
+interface DMOverview {
+  totalActiveIssues: number;
+  resolvedThisWeek: number;
+  pendingResolution: number;
+  studentsWithMultipleIssues: number;
+  averageResolutionTime: number;
+  attendanceRate: number;
+  latenessIncidents: number;
+  absenteeismCases: number;
+  interventionSuccess: number;
+  criticalCases: number;
 }
 
-interface StudentRecord {
-  id: string;
-  name: string;
-  class: string;
-  totalIncidents: number;
-  recentIncidents: number;
-  behaviorScore: number;
-  lastIncidentDate: string;
-  status: 'good' | 'warning' | 'concern' | 'critical';
-  parentContact: string;
+interface BehavioralTrends {
+  thisMonth: number;
+  lastMonth: number;
+  trend: "IMPROVING" | "DECLINING" | "STABLE";
 }
 
-interface DisciplinaryAction {
-  id: string;
+interface UrgentIntervention {
+  studentId: number;
   studentName: string;
-  studentClass: string;
-  actionType: 'warning' | 'detention' | 'suspension' | 'parent_meeting' | 'counseling';
-  description: string;
-  assignedBy: string;
-  dueDate: string;
-  status: 'pending' | 'completed' | 'overdue';
+  issueCount: number;
+  riskLevel: "HIGH" | "MEDIUM" | "LOW";
+  lastIncident: string;
+  recommendedAction: string;
+}
+
+interface IssueByType {
+  type: string;
+  count: number;
+  trend: "INCREASING" | "DECREASING" | "STABLE";
+  resolutionRate: number;
+}
+
+interface TodaysIncident {
+  id: number;
+  studentName: string;
+  type: string;
+  time: string;
+  severity: "LOW" | "MEDIUM" | "HIGH";
+  status: "PENDING" | "RESOLVED" | "ESCALATED";
+}
+
+interface DMDashboardData {
+  overview: DMOverview;
+  behavioralTrends: BehavioralTrends;
+  urgentInterventions: UrgentIntervention[];
+  issuesByType: IssueByType[];
+  todaysIncidents: TodaysIncident[];
 }
 
 interface DisciplineMasterDashboardProps {
   user: User;
+  selectedRole: any;
+  token: string;
   onLogout: () => void;
-  onNavigate: (screen: string) => void;
+  onNavigate: (screen: string, params?: any) => void;
 }
 
-const DisciplineMasterDashboard: React.FC<DisciplineMasterDashboardProps> = ({ user, onLogout }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'incidents' | 'students' | 'actions' | 'reports'>('overview');
-  const [showIncidentModal, setShowIncidentModal] = useState(false);
-  const [showActionModal, setShowActionModal] = useState(false);
-  const [selectedStudent, setSelectedStudent] = useState<string>('');
-  
-  const [newIncident, setNewIncident] = useState({
-    studentName: '',
-    studentClass: '',
-    incidentType: 'minor' as 'minor' | 'major' | 'severe',
-    description: '',
-    location: '',
-  });
+const DisciplineMasterDashboard: React.FC<DisciplineMasterDashboardProps> = ({ 
+  user, 
+  selectedRole, 
+  token, 
+  onLogout, 
+  onNavigate 
+}) => {
+  const [dashboardData, setDashboardData] = useState<DMDashboardData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState('overview');
 
-  const [newAction, setNewAction] = useState({
-    studentName: '',
-    studentClass: '',
-    actionType: 'warning' as 'warning' | 'detention' | 'suspension' | 'parent_meeting' | 'counseling',
-    description: '',
-    dueDate: '',
-  });
-
-  // Sample data - in real app, this would come from your backend
-  const [incidents] = useState<DisciplinaryIncident[]>([
-    {
-      id: '1',
-      studentName: 'Michael Johnson',
-      studentClass: 'Form 3A',
-      incidentType: 'major',
-      description: 'Disruptive behavior in Mathematics class, refusing to follow teacher instructions',
-      location: 'Mathematics Classroom',
-      reportedBy: 'Mrs. Elizabeth Thompson',
-      timestamp: '2024-12-06 10:30 AM',
-      status: 'investigating',
+  // Mock data for demonstration
+  const mockDashboardData: DMDashboardData = {
+    overview: {
+      totalActiveIssues: 12,
+      resolvedThisWeek: 18,
+      pendingResolution: 5,
+      studentsWithMultipleIssues: 8,
+      averageResolutionTime: 3.2,
+      attendanceRate: 95.3,
+      latenessIncidents: 8,
+      absenteeismCases: 15,
+      interventionSuccess: 87,
+      criticalCases: 2
     },
-    {
-      id: '2',
-      studentName: 'Sarah Williams',
-      studentClass: 'Form 2B',
-      incidentType: 'minor',
-      description: 'Late arrival to school without valid excuse',
-      location: 'School Gate',
-      reportedBy: 'Security Guard',
-      timestamp: '2024-12-06 8:45 AM',
-      status: 'resolved',
-      actionTaken: 'Verbal warning given',
+    behavioralTrends: {
+      thisMonth: 156,
+      lastMonth: 142,
+      trend: "DECLINING"
     },
-    {
-      id: '3',
-      studentName: 'David Brown',
-      studentClass: 'Form 4A',
-      incidentType: 'severe',
-      description: 'Fighting with another student during lunch break',
-      location: 'Cafeteria',
-      reportedBy: 'Mr. James Wilson',
-      timestamp: '2024-12-05 1:15 PM',
-      status: 'escalated',
-      actionTaken: 'Parents contacted, suspension pending',
-    },
-    {
-      id: '4',
-      studentName: 'Emily Davis',
-      studentClass: 'Form 1A',
-      incidentType: 'minor',
-      description: 'Talking during class after repeated warnings',
-      location: 'English Classroom',
-      reportedBy: 'Ms. Patricia Lee',
-      timestamp: '2024-12-05 11:20 AM',
-      status: 'resolved',
-      actionTaken: 'After-school detention assigned',
-    },
-  ]);
-
-  const [studentRecords] = useState<StudentRecord[]>([
-    {
-      id: '1',
-      name: 'Michael Johnson',
-      class: 'Form 3A',
-      totalIncidents: 5,
-      recentIncidents: 2,
-      behaviorScore: 65,
-      lastIncidentDate: '2024-12-06',
-      status: 'concern',
-      parentContact: '+237 670 123 456',
-    },
-    {
-      id: '2',
-      name: 'Sarah Williams',
-      class: 'Form 2B',
-      totalIncidents: 2,
-      recentIncidents: 1,
-      behaviorScore: 85,
-      lastIncidentDate: '2024-12-06',
-      status: 'good',
-      parentContact: '+237 677 234 567',
-    },
-    {
-      id: '3',
-      name: 'David Brown',
-      class: 'Form 4A',
-      totalIncidents: 8,
-      recentIncidents: 3,
-      behaviorScore: 45,
-      lastIncidentDate: '2024-12-05',
-      status: 'critical',
-      parentContact: '+237 681 345 678',
-    },
-    {
-      id: '4',
-      name: 'Emily Davis',
-      class: 'Form 1A',
-      totalIncidents: 1,
-      recentIncidents: 1,
-      behaviorScore: 92,
-      lastIncidentDate: '2024-12-05',
-      status: 'good',
-      parentContact: '+237 654 456 789',
-    },
-    {
-      id: '5',
-      name: 'James Miller',
-      class: 'Form 5B',
-      totalIncidents: 4,
-      recentIncidents: 1,
-      behaviorScore: 75,
-      lastIncidentDate: '2024-12-03',
-      status: 'warning',
-      parentContact: '+237 675 567 890',
-    },
-  ]);
-
-  const [disciplinaryActions] = useState<DisciplinaryAction[]>([
-    {
-      id: '1',
-      studentName: 'Michael Johnson',
-      studentClass: 'Form 3A',
-      actionType: 'parent_meeting',
-      description: 'Meeting with parents to discuss recent behavioral issues',
-      assignedBy: user.name,
-      dueDate: '2024-12-08',
-      status: 'pending',
-    },
-    {
-      id: '2',
-      studentName: 'David Brown',
-      studentClass: 'Form 4A',
-      actionType: 'suspension',
-      description: '3-day suspension for fighting incident',
-      assignedBy: user.name,
-      dueDate: '2024-12-07',
-      status: 'pending',
-    },
-    {
-      id: '3',
-      studentName: 'Emily Davis',
-      studentClass: 'Form 1A',
-      actionType: 'detention',
-      description: 'After-school detention for disruptive behavior',
-      assignedBy: user.name,
-      dueDate: '2024-12-06',
-      status: 'completed',
-    },
-    {
-      id: '4',
-      studentName: 'James Miller',
-      studentClass: 'Form 5B',
-      actionType: 'counseling',
-      description: 'Guidance counseling session for attitude improvement',
-      assignedBy: user.name,
-      dueDate: '2024-12-09',
-      status: 'pending',
-    },
-  ]);
-
-  const getIncidentTypeColor = (type: string) => {
-    switch (type) {
-      case 'severe': return '#e74c3c';
-      case 'major': return '#f39c12';
-      case 'minor': return '#27ae60';
-      default: return '#95a5a6';
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'resolved': return '#27ae60';
-      case 'investigating': return '#f39c12';
-      case 'escalated': return '#e74c3c';
-      case 'completed': return '#27ae60';
-      case 'overdue': return '#e74c3c';
-      case 'pending': return '#3498db';
-      default: return '#95a5a6';
-    }
-  };
-
-  const getBehaviorStatusColor = (status: string) => {
-    switch (status) {
-      case 'good': return '#27ae60';
-      case 'warning': return '#f39c12';
-      case 'concern': return '#e67e22';
-      case 'critical': return '#e74c3c';
-      default: return '#95a5a6';
-    }
-  };
-
-  const handleSubmitIncident = () => {
-    if (!newIncident.studentName || !newIncident.description) {
-      Alert.alert('Error', 'Please fill in all required fields');
-      return;
-    }
-
-    Alert.alert('Success', 'Incident reported successfully!', [
+    urgentInterventions: [
       {
-        text: 'OK',
-        onPress: () => {
-          setNewIncident({
-            studentName: '',
-            studentClass: '',
-            incidentType: 'minor',
-            description: '',
-            location: '',
-          });
-          setShowIncidentModal(false);
-        },
+        studentId: 1,
+        studentName: "Alice Brown",
+        issueCount: 5,
+        riskLevel: "HIGH",
+        lastIncident: "2024-01-22",
+        recommendedAction: "Parent meeting required"
       },
-    ]);
+      {
+        studentId: 2,
+        studentName: "David Jones",
+        issueCount: 4,
+        riskLevel: "HIGH",
+        lastIncident: "2024-01-20",
+        recommendedAction: "Behavioral intervention plan"
+      }
+    ],
+    issuesByType: [
+      {
+        type: "Morning Lateness",
+        count: 23,
+        trend: "DECREASING",
+        resolutionRate: 92
+      },
+      {
+        type: "Class Absence",
+        count: 15,
+        trend: "STABLE",
+        resolutionRate: 88
+      },
+      {
+        type: "Misconduct",
+        count: 8,
+        trend: "INCREASING",
+        resolutionRate: 75
+      }
+    ],
+    todaysIncidents: [
+      {
+        id: 1,
+        studentName: "John Doe",
+        type: "Lateness",
+        time: "08:15",
+        severity: "LOW",
+        status: "PENDING"
+      },
+      {
+        id: 2,
+        studentName: "Mary Smith",
+        type: "Misconduct",
+        time: "10:30",
+        severity: "HIGH",
+        status: "ESCALATED"
+      },
+      {
+        id: 3,
+        studentName: "Peter Johnson",
+        type: "Absence",
+        time: "All Day",
+        severity: "MEDIUM",
+        status: "PENDING"
+      }
+    ]
   };
 
-  const handleSubmitAction = () => {
-    if (!newAction.studentName || !newAction.description) {
-      Alert.alert('Error', 'Please fill in all required fields');
-      return;
+  // API call to fetch DM dashboard data
+  const fetchDashboardData = async () => {
+    try {
+      console.log('🎯 Fetching Discipline Master dashboard data...');
+      
+      const response = await fetch('https://sms.sniperbuisnesscenter.com/api/v1/discipline-master/dashboard', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log('DM Dashboard API Response Status:', response.status);
+
+      if (response.ok) {
+        const apiData = await response.json();
+        console.log('DM Dashboard API Response:', JSON.stringify(apiData, null, 2));
+        
+        if (apiData.success && apiData.data) {
+          // Data transformation to match component's expected structure
+          const {
+            behavioralTrends,
+            urgentInterventions,
+            issuesByType,
+            todaysIncidents,
+            ...overviewData
+          } = apiData.data;
+
+          const transformedData: DMDashboardData = {
+            overview: overviewData as DMOverview,
+            behavioralTrends,
+            urgentInterventions,
+            issuesByType,
+            todaysIncidents: todaysIncidents || [],
+          };
+
+          setDashboardData(transformedData);
+          console.log('✅ Successfully loaded and transformed real DM dashboard data');
+          return;
+        }
+      } else {
+        const errorData = await response.text();
+        console.log('DM Dashboard API Error:', response.status, errorData);
+      }
+    } catch (error) {
+      console.log('DM Dashboard API call failed:', error);
     }
 
-    Alert.alert('Success', 'Disciplinary action assigned successfully!', [
-      {
-        text: 'OK',
-        onPress: () => {
-          setNewAction({
-            studentName: '',
-            studentClass: '',
-            actionType: 'warning',
-            description: '',
-            dueDate: '',
-          });
-          setShowActionModal(false);
-        },
-      },
-    ]);
+    // Fallback to mock data
+    console.log('📋 Using mock DM dashboard data as fallback');
+    setDashboardData(mockDashboardData);
   };
 
-  const renderOverview = () => (
-    <ScrollView showsVerticalScrollIndicator={false}>
-      <View style={styles.metricsGrid}>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricIcon}>📊</Text>
-          <Text style={styles.metricValue}>{incidents.length}</Text>
-          <Text style={styles.metricLabel}>Total Incidents</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricIcon}>⚠️</Text>
-          <Text style={styles.metricValue}>{incidents.filter(i => i.status === 'investigating').length}</Text>
-          <Text style={styles.metricLabel}>Under Investigation</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricIcon}>🎯</Text>
-          <Text style={styles.metricValue}>{disciplinaryActions.filter(a => a.status === 'pending').length}</Text>
-          <Text style={styles.metricLabel}>Pending Actions</Text>
-        </View>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricIcon}>👥</Text>
-          <Text style={styles.metricValue}>{studentRecords.filter(s => s.status !== 'good').length}</Text>
-          <Text style={styles.metricLabel}>Students at Risk</Text>
-        </View>
-      </View>
+  useEffect(() => {
+    fetchDashboardData().finally(() => setIsLoading(false));
+  }, []);
 
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Recent Incidents</Text>
-        {incidents.slice(0, 3).map((incident) => (
-          <View key={incident.id} style={styles.incidentItem}>
-            <View style={styles.incidentHeader}>
-              <View style={styles.incidentInfo}>
-                <Text style={styles.studentName}>{incident.studentName}</Text>
-                <Text style={styles.classInfo}>{incident.studentClass}</Text>
-              </View>
-              <View style={styles.incidentBadges}>
-                <View style={[styles.typeBadge, { backgroundColor: getIncidentTypeColor(incident.incidentType) }]}>
-                  <Text style={styles.badgeText}>{incident.incidentType.toUpperCase()}</Text>
-                </View>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(incident.status) }]}>
-                  <Text style={styles.badgeText}>{incident.status.toUpperCase()}</Text>
-                </View>
-              </View>
-            </View>
-            <Text style={styles.incidentDescription} numberOfLines={2}>
-              {incident.description}
-            </Text>
-            <Text style={styles.incidentTime}>{incident.timestamp}</Text>
-          </View>
-        ))}
-      </View>
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchDashboardData();
+    setRefreshing(false);
+  };
 
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Quick Actions</Text>
-        <View style={styles.actionGrid}>
-          <TouchableOpacity style={styles.actionButton} onPress={() => setShowIncidentModal(true)}>
-            <Text style={styles.actionIcon}>📝</Text>
-            <Text style={styles.actionText}>Report Incident</Text>
+  const handleLogout = () => {
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Logout', style: 'destructive', onPress: onLogout },
+      ]
+    );
+  };
+
+  // Helper functions
+  const getSeverityColor = (severity: 'HIGH' | 'MEDIUM' | 'LOW') => {
+    switch (severity) {
+      case 'HIGH': return '#e74c3c';
+      case 'MEDIUM': return '#f39c12';
+      default: return '#95a5a6';
+    }
+  };
+
+  const getTrendIcon = (trend: string) => {
+    switch (trend) {
+      case 'INCREASING': return '📈';
+      case 'DECREASING': return '📉';
+      case 'IMPROVING': return '📈';
+      case 'DECLINING': return '📉';
+      default: return '➡️';
+    }
+  };
+
+  const getTypeIcon = (type: string) => {
+    switch (type.toLowerCase()) {
+      case 'lateness': return '⏰';
+      case 'misconduct': return '⚠️';
+      case 'absence': return '❌';
+      default: return '📝';
+    }
+  };
+
+  // Mobile-focused quick actions for DM
+  // const quickActions = [
+  //   { 
+  //     id: '1', 
+  //     title: 'Record Lateness', 
+  //     icon: '⏰', 
+  //     color: '#e74c3c', 
+  //     count: dashboardData?.overview?.latenessIncidents || 0,
+  //     description: 'Quick lateness entry',
+  //     action: () => onNavigate('RecordLateness', { token, user })
+  //   },
+  //   { 
+  //     id: '2', 
+  //     title: 'New Incident', 
+  //     icon: '⚠️', 
+  //     color: '#f39c12', 
+  //     count: dashboardData?.overview?.totalActiveIssues || 0,
+  //     description: 'Report discipline issue',
+  //     action: () => onNavigate('NewIncident', { token, user })
+  //   },
+  //   { 
+  //     id: '3', 
+  //     title: 'Attendance', 
+  //     icon: '📅', 
+  //     color: '#3498db', 
+  //     count: dashboardData?.overview?.absenteeismCases || 0,
+  //     description: 'Manage daily attendance',
+  //     action: () => onNavigate('AttendanceManagement', { token, user })
+  //   },
+  //   { 
+  //     id: '4', 
+  //     title: 'High Risk', 
+  //     icon: '🚨', 
+  //     color: '#e67e22', 
+  //     count: dashboardData?.overview?.criticalCases || 0,
+  //     description: 'Critical cases review',
+  //     action: () => onNavigate('HighRiskStudents', { token, user })
+  //   }
+  // ];
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#c0392b" />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#c0392b" />
+          <Text style={styles.loadingText}>Loading Discipline Master Dashboard...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!dashboardData) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#c0392b" />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Failed to load dashboard data</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={fetchDashboardData}>
+            <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={() => setShowActionModal(true)}>
-            <Text style={styles.actionIcon}>⚖️</Text>
-            <Text style={styles.actionText}>Assign Action</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={() => setActiveTab('students')}>
-            <Text style={styles.actionIcon}>👥</Text>
-            <Text style={styles.actionText}>View Students</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton} onPress={() => setActiveTab('reports')}>
-            <Text style={styles.actionIcon}>📊</Text>
-            <Text style={styles.actionText}>Generate Report</Text>
-          </TouchableOpacity>
         </View>
-      </View>
-
-      <View style={styles.sectionCard}>
-        <Text style={styles.sectionTitle}>Critical Students</Text>
-        {studentRecords
-          .filter(student => student.status === 'critical' || student.status === 'concern')
-          .map((student) => (
-            <View key={student.id} style={styles.studentItem}>
-              <View style={styles.studentInfo}>
-                <Text style={styles.studentName}>{student.name}</Text>
-                <Text style={styles.classInfo}>{student.class}</Text>
-              </View>
-              <View style={styles.studentStats}>
-                <Text style={styles.incidentCount}>{student.totalIncidents} incidents</Text>
-                <View style={[styles.statusBadge, { backgroundColor: getBehaviorStatusColor(student.status) }]}>
-                  <Text style={styles.badgeText}>{student.status.toUpperCase()}</Text>
-                </View>
-              </View>
-            </View>
-          ))}
-      </View>
-    </ScrollView>
-  );
-
-  const renderIncidents = () => (
-    <ScrollView showsVerticalScrollIndicator={false}>
-      <View style={styles.headerActions}>
-        <Text style={styles.sectionTitle}>Disciplinary Incidents</Text>
-        <TouchableOpacity style={styles.addButton} onPress={() => setShowIncidentModal(true)}>
-          <Text style={styles.addButtonText}>+ Report</Text>
-        </TouchableOpacity>
-      </View>
-
-      {incidents.map((incident) => (
-        <View key={incident.id} style={styles.incidentCard}>
-          <View style={styles.incidentHeader}>
-            <View style={styles.incidentInfo}>
-              <Text style={styles.studentName}>{incident.studentName}</Text>
-              <Text style={styles.classInfo}>{incident.studentClass} • {incident.location}</Text>
-            </View>
-            <View style={styles.incidentBadges}>
-              <View style={[styles.typeBadge, { backgroundColor: getIncidentTypeColor(incident.incidentType) }]}>
-                <Text style={styles.badgeText}>{incident.incidentType.toUpperCase()}</Text>
-              </View>
-              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(incident.status) }]}>
-                <Text style={styles.badgeText}>{incident.status.toUpperCase()}</Text>
-              </View>
-            </View>
-          </View>
-
-          <Text style={styles.incidentDescription}>{incident.description}</Text>
-          
-          <View style={styles.incidentFooter}>
-            <Text style={styles.reportedBy}>Reported by: {incident.reportedBy}</Text>
-            <Text style={styles.incidentTime}>{incident.timestamp}</Text>
-          </View>
-
-          {incident.actionTaken && (
-            <View style={styles.actionTakenSection}>
-              <Text style={styles.actionTakenLabel}>Action Taken:</Text>
-              <Text style={styles.actionTakenText}>{incident.actionTaken}</Text>
-            </View>
-          )}
-
-          <View style={styles.incidentActions}>
-            <TouchableOpacity style={styles.investigateButton}>
-              <Text style={styles.buttonText}>🔍 Investigate</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.resolveButton}>
-              <Text style={styles.buttonText}>✅ Resolve</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ))}
-    </ScrollView>
-  );
-
-  const renderStudents = () => (
-    <ScrollView showsVerticalScrollIndicator={false}>
-      <Text style={styles.sectionTitle}>Student Behavior Records</Text>
-      
-      {studentRecords.map((student) => (
-        <View key={student.id} style={styles.studentCard}>
-          <View style={styles.studentHeader}>
-            <View style={styles.studentInfo}>
-              <Text style={styles.studentName}>{student.name}</Text>
-              <Text style={styles.classInfo}>{student.class}</Text>
-            </View>
-            <View style={styles.studentBadges}>
-              <View style={[styles.statusBadge, { backgroundColor: getBehaviorStatusColor(student.status) }]}>
-                <Text style={styles.badgeText}>{student.status.toUpperCase()}</Text>
-              </View>
-              <Text style={styles.behaviorScore}>{student.behaviorScore}/100</Text>
-            </View>
-          </View>
-
-          <View style={styles.studentStats}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{student.totalIncidents}</Text>
-              <Text style={styles.statLabel}>Total Incidents</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{student.recentIncidents}</Text>
-              <Text style={styles.statLabel}>Recent (30 days)</Text>
-            </View>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{student.lastIncidentDate}</Text>
-              <Text style={styles.statLabel}>Last Incident</Text>
-            </View>
-          </View>
-
-          <View style={styles.studentActions}>
-            <TouchableOpacity style={styles.contactButton}>
-              <Text style={styles.contactButtonText}>📞 Contact Parent</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.viewRecordButton}>
-              <Text style={styles.buttonText}>📋 View Record</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ))}
-    </ScrollView>
-  );
-
-  const renderActions = () => (
-    <ScrollView showsVerticalScrollIndicator={false}>
-      <View style={styles.headerActions}>
-        <Text style={styles.sectionTitle}>Disciplinary Actions</Text>
-        <TouchableOpacity style={styles.addButton} onPress={() => setShowActionModal(true)}>
-          <Text style={styles.addButtonText}>+ Assign</Text>
-        </TouchableOpacity>
-      </View>
-
-      {disciplinaryActions.map((action) => (
-        <View key={action.id} style={styles.actionCard}>
-          <View style={styles.actionHeader}>
-            <View style={styles.actionInfo}>
-              <Text style={styles.studentName}>{action.studentName}</Text>
-              <Text style={styles.classInfo}>{action.studentClass}</Text>
-            </View>
-            <View style={styles.actionBadges}>
-              <View style={styles.actionTypeBadge}>
-                <Text style={styles.actionTypeText}>{action.actionType.replace('_', ' ').toUpperCase()}</Text>
-              </View>
-              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(action.status) }]}>
-                <Text style={styles.badgeText}>{action.status.toUpperCase()}</Text>
-              </View>
-            </View>
-          </View>
-
-          <Text style={styles.actionDescription}>{action.description}</Text>
-          
-          <View style={styles.actionFooter}>
-            <Text style={styles.assignedBy}>Assigned by: {action.assignedBy}</Text>
-            <Text style={styles.dueDate}>Due: {action.dueDate}</Text>
-          </View>
-
-          <View style={styles.actionButtons}>
-            <TouchableOpacity style={styles.completeButton}>
-              <Text style={styles.buttonText}>✅ Mark Complete</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.editButton}>
-              <Text style={styles.buttonText}>✏️ Edit</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      ))}
-    </ScrollView>
-  );
-
-  const renderReports = () => (
-    <ScrollView showsVerticalScrollIndicator={false}>
-      <Text style={styles.sectionTitle}>Behavior Reports</Text>
-      
-      <View style={styles.reportCard}>
-        <Text style={styles.reportTitle}>📊 Incident Statistics</Text>
-        <View style={styles.statsGrid}>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{incidents.filter(i => i.incidentType === 'minor').length}</Text>
-            <Text style={styles.statCategory}>Minor Incidents</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{incidents.filter(i => i.incidentType === 'major').length}</Text>
-            <Text style={styles.statCategory}>Major Incidents</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{incidents.filter(i => i.incidentType === 'severe').length}</Text>
-            <Text style={styles.statCategory}>Severe Incidents</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.reportCard}>
-        <Text style={styles.reportTitle}>🎯 Action Effectiveness</Text>
-        <View style={styles.effectivenessStats}>
-          <View style={styles.effectivenessItem}>
-            <Text style={styles.effectivenessLabel}>Completed Actions</Text>
-            <Text style={styles.effectivenessValue}>
-              {disciplinaryActions.filter(a => a.status === 'completed').length}/{disciplinaryActions.length}
-            </Text>
-          </View>
-          <View style={styles.effectivenessItem}>
-            <Text style={styles.effectivenessLabel}>Pending Actions</Text>
-            <Text style={styles.effectivenessValue}>
-              {disciplinaryActions.filter(a => a.status === 'pending').length}
-            </Text>
-          </View>
-          <View style={styles.effectivenessItem}>
-            <Text style={styles.effectivenessLabel}>Overdue Actions</Text>
-            <Text style={styles.effectivenessValue}>
-              {disciplinaryActions.filter(a => a.status === 'overdue').length}
-            </Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.reportCard}>
-        <Text style={styles.reportTitle}>📈 Trends & Insights</Text>
-        <View style={styles.trendItem}>
-          <Text style={styles.trendIcon}>📉</Text>
-          <View style={styles.trendContent}>
-            <Text style={styles.trendText}>Incidents decreased by 15% compared to last month</Text>
-            <Text style={styles.trendType}>Positive Trend</Text>
-          </View>
-        </View>
-        <View style={styles.trendItem}>
-          <Text style={styles.trendIcon}>⚠️</Text>
-          <View style={styles.trendContent}>
-            <Text style={styles.trendText}>Form 4A has highest incident rate - needs attention</Text>
-            <Text style={styles.trendType}>Action Required</Text>
-          </View>
-        </View>
-        <View style={styles.trendItem}>
-          <Text style={styles.trendIcon}>👍</Text>
-          <View style={styles.trendContent}>
-            <Text style={styles.trendText}>85% of assigned actions completed on time</Text>
-            <Text style={styles.trendType}>Good Performance</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.exportSection}>
-        <TouchableOpacity style={styles.exportButton}>
-          <Text style={styles.exportButtonText}>📄 Export Full Behavior Report</Text>
-        </TouchableOpacity>
-      </View>
-    </ScrollView>
-  );
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#e67e22" />
+      <StatusBar barStyle="light-content" backgroundColor="#c0392b" />
       
+      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>🛡️ Discipline Master</Text>
+          <Text style={styles.headerTitle}>⚖️ Discipline Master</Text>
+          <Text style={styles.headerSubtitle}>Behavioral Management</Text>
           <Text style={styles.welcomeText}>Welcome, {user.name}</Text>
         </View>
-        <TouchableOpacity style={styles.logoutButton} onPress={onLogout}>
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Text style={styles.logoutIcon}>🚪</Text>
         </TouchableOpacity>
       </View>
 
+      {/* Mobile Tab Navigation */}
       <View style={styles.tabContainer}>
         <TouchableOpacity 
           style={[styles.tab, activeTab === 'overview' && styles.activeTab]}
           onPress={() => setActiveTab('overview')}
         >
-          <Text style={[styles.tabText, activeTab === 'overview' && styles.activeTabText]}>
-            Overview
-          </Text>
+          <Text style={[styles.tabText, activeTab === 'overview' && styles.activeTabText]}>Overview</Text>
         </TouchableOpacity>
-        
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'incidents' && styles.activeTab]}
-          onPress={() => setActiveTab('incidents')}
+          style={[styles.tab, activeTab === 'today' && styles.activeTab]}
+          onPress={() => setActiveTab('today')}
         >
-          <Text style={[styles.tabText, activeTab === 'incidents' && styles.activeTabText]}>
-            Incidents
-          </Text>
+          <Text style={[styles.tabText, activeTab === 'today' && styles.activeTabText]}>Today</Text>
         </TouchableOpacity>
-        
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'students' && styles.activeTab]}
-          onPress={() => setActiveTab('students')}
+          style={[styles.tab, activeTab === 'trends' && styles.activeTab]}
+          onPress={() => setActiveTab('trends')}
         >
-          <Text style={[styles.tabText, activeTab === 'students' && styles.activeTabText]}>
-            Students
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'actions' && styles.activeTab]}
-          onPress={() => setActiveTab('actions')}
-        >
-          <Text style={[styles.tabText, activeTab === 'actions' && styles.activeTabText]}>
-            Actions
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'reports' && styles.activeTab]}
-          onPress={() => setActiveTab('reports')}
-        >
-          <Text style={[styles.tabText, activeTab === 'reports' && styles.activeTabText]}>
-            Reports
-          </Text>
+          <Text style={[styles.tabText, activeTab === 'trends' && styles.activeTabText]}>Trends</Text>
         </TouchableOpacity>
       </View>
 
-      <View style={styles.content}>
-        {activeTab === 'overview' && renderOverview()}
-        {activeTab === 'incidents' && renderIncidents()}
-        {activeTab === 'students' && renderStudents()}
-        {activeTab === 'actions' && renderActions()}
-        {activeTab === 'reports' && renderReports()}
-      </View>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+        }
+      >
+        {activeTab === 'overview' && (
+          <>
+            {/* Daily Discipline Overview */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Daily Discipline Overview</Text>
+              <View style={styles.statsGrid}>
+                <View style={[styles.statCard, { backgroundColor: '#e74c3c' }]}>
+                  <Text style={styles.statNumber}>{dashboardData?.overview?.totalActiveIssues || 0}</Text>
+                  <Text style={styles.statLabel}>Active Issues</Text>
+                </View>
+                <View style={[styles.statCard, { backgroundColor: '#f39c12' }]}>
+                  <Text style={styles.statNumber}>{dashboardData?.overview?.latenessIncidents || 0}</Text>
+                  <Text style={styles.statLabel}>Late Arrivals</Text>
+                </View>
+                <View style={[styles.statCard, { backgroundColor: '#3498db' }]}>
+                  <Text style={styles.statNumber}>{dashboardData?.overview?.absenteeismCases || 0}</Text>
+                  <Text style={styles.statLabel}>Absences</Text>
+                </View>
+                <View style={[styles.statCard, { backgroundColor: '#27ae60' }]}>
+                  <Text style={styles.statNumber}>{Math.round(dashboardData?.overview?.attendanceRate || 0)}%</Text>
+                  <Text style={styles.statLabel}>Attendance Rate</Text>
+                </View>
+              </View>
+              
+              {/* Performance Summary */}
+              <View style={styles.performanceSummary}>
+                <View style={styles.performanceRow}>
+                  <Text style={styles.performanceLabel}>📊 Resolution Rate:</Text>
+                  <Text style={styles.performanceValue}>{dashboardData?.overview?.interventionSuccess || 0}%</Text>
+                </View>
+                <View style={styles.performanceRow}>
+                  <Text style={styles.performanceLabel}>⏱️ Avg Resolution Time:</Text>
+                  <Text style={styles.performanceValue}>{dashboardData?.overview?.averageResolutionTime || 0} days</Text>
+                </View>
+                <View style={styles.performanceRow}>
+                  <Text style={styles.performanceLabel}>🚨 Critical Cases:</Text>
+                  <Text style={styles.performanceValue}>{dashboardData?.overview?.criticalCases || 0}</Text>
+                </View>
+              </View>
+            </View>
 
-      {/* Report Incident Modal */}
-      <Modal visible={showIncidentModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Report New Incident</Text>
-            
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Student Name"
-              value={newIncident.studentName}
-              onChangeText={(text) => setNewIncident({...newIncident, studentName: text})}
-            />
-            
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Class (e.g., Form 3A)"
-              value={newIncident.studentClass}
-              onChangeText={(text) => setNewIncident({...newIncident, studentClass: text})}
-            />
-            
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Location"
-              value={newIncident.location}
-              onChangeText={(text) => setNewIncident({...newIncident, location: text})}
-            />
-            
-            <TextInput
-              style={[styles.modalInput, styles.textArea]}
-              placeholder="Describe the incident..."
-              multiline
-              numberOfLines={4}
-              value={newIncident.description}
-              onChangeText={(text) => setNewIncident({...newIncident, description: text})}
-            />
+            {/* Urgent Interventions */}
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>🚨 Urgent Interventions</Text>
+              
+              {dashboardData?.urgentInterventions?.map((intervention) => (
+                <View key={intervention.studentId} style={styles.alertCard}>
+                  <View style={styles.alertHeader}>
+                    <Text style={styles.alertIcon}>👤</Text>
+                    <View style={styles.alertContent}>
+                      <Text style={styles.alertMessage}>{intervention.studentName}</Text>
+                      <Text style={styles.alertTime}>{intervention.issueCount} issues - {intervention.recommendedAction}</Text>
+                    </View>
+                    <View style={[styles.priorityBadge, { backgroundColor: getSeverityColor(intervention.riskLevel) }]}>
+                      <Text style={styles.priorityText}>{intervention.riskLevel}</Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
 
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={styles.cancelButton} 
-                onPress={() => setShowIncidentModal(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.submitButton} onPress={handleSubmitIncident}>
-                <Text style={styles.submitButtonText}>Report Incident</Text>
-              </TouchableOpacity>
+              {(!dashboardData?.urgentInterventions || dashboardData.urgentInterventions.length === 0) && (
+                <View style={styles.emptyState}>
+                  <Text style={styles.emptyIcon}>✅</Text>
+                  <Text style={styles.emptyText}>No urgent interventions</Text>
+                  <Text style={styles.emptySubtext}>All critical cases are under control</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Quick Actions */}
+            <View style={styles.section}>
+              {/* <Text style={styles.sectionTitle}>Quick Actions</Text> */}
+              {/* <View style={styles.actionsGrid}>
+                {quickActions.map((action) => (
+                  <TouchableOpacity
+                    key={action.id}
+                    style={[styles.actionCard, { borderTopColor: action.color }]}
+                    onPress={action.action}
+                  >
+                    <View style={styles.actionHeader}>
+                      <Text style={styles.actionIcon}>{action.icon}</Text>
+                      {action.count > 0 && (
+                        <View style={[styles.badge, { backgroundColor: action.color }]}>
+                          <Text style={styles.badgeText}>{action.count}</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={styles.actionTitle}>{action.title}</Text>
+                    <Text style={styles.actionDescription}>{action.description}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View> */}
+            </View>
+          </>
+        )}
+
+        {activeTab === 'today' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>📅 Today's Incidents</Text>
+            
+            {dashboardData?.todaysIncidents?.length > 0 ? (
+              dashboardData.todaysIncidents.map((incident) => (
+                <View key={incident.id} style={styles.incidentCard}>
+                  <View style={styles.incidentHeader}>
+                    <View style={styles.incidentIcon}>
+                      <Text style={styles.incidentTypeIcon}>{getTypeIcon(incident.type)}</Text>
+                    </View>
+                    <View style={styles.incidentContent}>
+                      <Text style={styles.incidentStudent}>{incident.studentName}</Text>
+                      <Text style={styles.incidentType}>{incident.type} • {incident.time}</Text>
+                    </View>
+                    <View style={[
+                      styles.severityBadge, 
+                      { backgroundColor: getSeverityColor(incident.severity) }
+                    ]}>
+                      <Text style={styles.severityText}>{incident.severity}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.incidentActions}>
+                    <TouchableOpacity style={styles.incidentActionButton}>
+                      <Text style={styles.incidentActionText}>Review</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.incidentActionButton}>
+                      <Text style={styles.incidentActionText}>Update</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyIcon}>📅</Text>
+                <Text style={styles.emptyText}>No incidents today</Text>
+                <Text style={styles.emptySubtext}>Great! No discipline issues reported yet</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {activeTab === 'trends' && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>📈 Behavioral Trends</Text>
+            
+            {/* Monthly Comparison */}
+            <View style={styles.trendsCard}>
+              <Text style={styles.trendsTitle}>📊 Monthly Comparison</Text>
+              <View style={styles.trendsRow}>
+                <Text style={styles.trendsLabel}>This Month:</Text>
+                <Text style={styles.trendsValue}>{dashboardData?.behavioralTrends?.thisMonth || 0} incidents</Text>
+              </View>
+              <View style={styles.trendsRow}>
+                <Text style={styles.trendsLabel}>Last Month:</Text>
+                <Text style={styles.trendsValue}>{dashboardData?.behavioralTrends?.lastMonth || 0} incidents</Text>
+              </View>
+              <View style={styles.trendsRow}>
+                <Text style={styles.trendsLabel}>Trend:</Text>
+                <Text style={[
+                  styles.trendsValue,
+                  { color: dashboardData?.behavioralTrends?.trend === 'IMPROVING' ? '#27ae60' : '#e74c3c' }
+                ]}>
+                  {getTrendIcon(dashboardData?.behavioralTrends?.trend || 'STABLE')} {dashboardData?.behavioralTrends?.trend || 'STABLE'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Issues by Type */}
+            <View style={styles.trendsCard}>
+              <Text style={styles.trendsTitle}>📋 Issues by Type</Text>
+              {dashboardData?.issuesByType?.map((issue, index) => (
+                <View key={index} style={styles.issueTypeRow}>
+                  <View style={styles.issueTypeHeader}>
+                    <Text style={styles.issueTypeName}>{issue.type}</Text>
+                    <Text style={styles.issueTypeCount}>{issue.count}</Text>
+                  </View>
+                  <View style={styles.issueTypeDetails}>
+                    <Text style={styles.issueTypeDetail}>
+                      {getTrendIcon(issue.trend)} {issue.trend}
+                    </Text>
+                    <Text style={styles.issueTypeDetail}>
+                      ✅ {issue.resolutionRate}% resolved
+                    </Text>
+                  </View>
+                </View>
+              ))}
             </View>
           </View>
-        </View>
-      </Modal>
+        )}
 
-      {/* Assign Action Modal */}
-      <Modal visible={showActionModal} animationType="slide" transparent>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Assign Disciplinary Action</Text>
-            
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Student Name"
-              value={newAction.studentName}
-              onChangeText={(text) => setNewAction({...newAction, studentName: text})}
-            />
-            
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Class"
-              value={newAction.studentClass}
-              onChangeText={(text) => setNewAction({...newAction, studentClass: text})}
-            />
-            
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Due Date (YYYY-MM-DD)"
-              value={newAction.dueDate}
-              onChangeText={(text) => setNewAction({...newAction, dueDate: text})}
-            />
-            
-            <TextInput
-              style={[styles.modalInput, styles.textArea]}
-              placeholder="Action description..."
-              multiline
-              numberOfLines={4}
-              value={newAction.description}
-              onChangeText={(text) => setNewAction({...newAction, description: text})}
-            />
-
-            <View style={styles.modalButtons}>
-              <TouchableOpacity 
-                style={styles.cancelButton} 
-                onPress={() => setShowActionModal(false)}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.submitButton} onPress={handleSubmitAction}>
-                <Text style={styles.submitButtonText}>Assign Action</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        {/* Add extra padding for bottom navigation */}
+        <View style={styles.bottomPadding} />
+      </ScrollView>
     </SafeAreaView>
   );
 };
@@ -805,41 +588,80 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
-  header: {
-    backgroundColor: '#e67e22',
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+  },
+  loadingText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#c0392b',
+    fontWeight: '500',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
     padding: 20,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#e74c3c',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: '#c0392b',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  header: {
+    backgroundColor: '#c0392b',
+    paddingTop: 12,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
   headerContent: {
     flex: 1,
   },
   headerTitle: {
-    color: '#fff',
+    color: 'white',
     fontSize: 24,
     fontWeight: 'bold',
   },
+  headerSubtitle: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 14,
+    marginTop: 2,
+  },
   welcomeText: {
     color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 14,
-    marginTop: 5,
+    fontSize: 12,
+    marginTop: 4,
   },
   logoutButton: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    padding: 8,
   },
   logoutIcon: {
-    fontSize: 20,
+    fontSize: 24,
   },
   tabContainer: {
-    backgroundColor: '#fff',
+    backgroundColor: 'white',
     flexDirection: 'row',
     borderBottomWidth: 1,
-    borderBottomColor: '#ecf0f1',
+    borderBottomColor: '#e9ecef',
   },
   tab: {
     flex: 1,
@@ -847,330 +669,135 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   activeTab: {
-    borderBottomWidth: 3,
-    borderBottomColor: '#e67e22',
+    borderBottomWidth: 2,
+    borderBottomColor: '#c0392b',
   },
   tabText: {
-    fontSize: 12,
-    color: '#7f8c8d',
+    fontSize: 14,
+    color: '#6c757d',
     fontWeight: '500',
   },
   activeTabText: {
-    color: '#e67e22',
-    fontWeight: 'bold',
+    color: '#c0392b',
+    fontWeight: '600',
   },
   content: {
     flex: 1,
-    padding: 20,
   },
-  metricsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-  },
-  metricCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    width: '48%',
-    alignItems: 'center',
-    marginBottom: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  metricIcon: {
-    fontSize: 24,
-    marginBottom: 10,
-  },
-  metricValue: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 5,
-  },
-  metricLabel: {
-    fontSize: 12,
-    color: '#7f8c8d',
-    textAlign: 'center',
-  },
-  sectionCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+  section: {
+    padding: 16,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
     color: '#2c3e50',
-    marginBottom: 15,
+    marginBottom: 12,
   },
-  headerActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  addButton: {
-    backgroundColor: '#e67e22',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-  },
-  addButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: 'bold',
-  },
-  actionGrid: {
+  statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
+    marginHorizontal: -6,
   },
-  actionButton: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 10,
-    padding: 15,
-    width: '48%',
-    alignItems: 'center',
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#ecf0f1',
-  },
-  actionIcon: {
-    fontSize: 20,
-    marginBottom: 8,
-  },
-  actionText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#2c3e50',
-    textAlign: 'center',
-  },
-  incidentItem: {
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ecf0f1',
-  },
-  incidentCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  incidentHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  incidentInfo: {
-    flex: 1,
-  },
-  studentInfo: {
-    flex: 1,
-  },
-  studentName: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-  },
-  classInfo: {
-    fontSize: 12,
-    color: '#7f8c8d',
-    marginTop: 2,
-  },
-  incidentBadges: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  typeBadge: {
-    borderRadius: 12,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-    marginRight: 8,
-  },
-  statusBadge: {
-    borderRadius: 12,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-  },
-  badgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-  incidentDescription: {
-    fontSize: 14,
-    color: '#2c3e50',
-    lineHeight: 20,
-    marginBottom: 10,
-  },
-  incidentTime: {
-    fontSize: 11,
-    color: '#95a5a6',
-  },
-  incidentFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  reportedBy: {
-    fontSize: 12,
-    color: '#7f8c8d',
-    flex: 1,
-  },
-  actionTakenSection: {
-    backgroundColor: '#f8f9fa',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 15,
-  },
-  actionTakenLabel: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#e67e22',
-    marginBottom: 5,
-  },
-  actionTakenText: {
-    fontSize: 13,
-    color: '#2c3e50',
-  },
-  incidentActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  investigateButton: {
+  statCard: {
+    width: (width - 44) / 2,
     backgroundColor: '#3498db',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    flex: 1,
-    marginRight: 5,
-    alignItems: 'center',
-  },
-  resolveButton: {
-    backgroundColor: '#27ae60',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    flex: 1,
-    marginLeft: 5,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  studentItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ecf0f1',
-  },
-  studentCard: {
-    backgroundColor: '#fff',
     borderRadius: 12,
-    padding: 20,
-    marginBottom: 15,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  studentHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  studentBadges: {
-    flexDirection: 'row',
+    padding: 16,
+    margin: 6,
     alignItems: 'center',
   },
-  behaviorScore: {
-    fontSize: 14,
+  statNumber: {
+    color: 'white',
+    fontSize: 28,
     fontWeight: 'bold',
-    color: '#e67e22',
-    marginLeft: 10,
-  },
-  studentStats: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 15,
-  },
-  statItem: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  statValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 5,
   },
   statLabel: {
-    fontSize: 10,
-    color: '#7f8c8d',
+    color: 'white',
+    fontSize: 12,
+    marginTop: 4,
     textAlign: 'center',
   },
-  studentActions: {
+  performanceSummary: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  performanceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
   },
-  contactButton: {
-    backgroundColor: '#e67e22',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 15,
+  performanceLabel: {
+    fontSize: 14,
+    color: '#495057',
     flex: 1,
-    marginRight: 5,
+  },
+  performanceValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  alertCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  alertHeader: {
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  contactButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
+  alertIcon: {
+    fontSize: 24,
+    marginRight: 12,
   },
-  viewRecordButton: {
-    backgroundColor: '#3498db',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 15,
+  alertContent: {
     flex: 1,
-    marginLeft: 5,
-    alignItems: 'center',
   },
-  incidentCount: {
+  alertMessage: {
+    fontSize: 14,
+    color: '#2c3e50',
+    fontWeight: '500',
+  },
+  alertTime: {
     fontSize: 12,
-    color: '#7f8c8d',
-    marginRight: 10,
+    color: '#6c757d',
+    marginTop: 2,
+  },
+  priorityBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  priorityText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  actionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginHorizontal: -6,
   },
   actionCard: {
-    backgroundColor: '#fff',
+    width: (width - 44) / 2,
+    backgroundColor: 'white',
     borderRadius: 12,
-    padding: 20,
-    marginBottom: 15,
+    padding: 16,
+    margin: 6,
+    borderTopWidth: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -1179,234 +806,183 @@ const styles = StyleSheet.create({
   },
   actionHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
   },
-  actionInfo: {
-    flex: 1,
-  },
-  actionBadges: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  actionTypeBadge: {
-    backgroundColor: '#95a5a6',
-    borderRadius: 12,
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+  actionIcon: {
+    fontSize: 24,
     marginRight: 8,
   },
-  actionTypeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
+  badge: {
+    backgroundColor: '#e74c3c',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 'auto',
+  },
+  badgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  actionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 4,
   },
   actionDescription: {
-    fontSize: 14,
-    color: '#2c3e50',
-    lineHeight: 20,
-    marginBottom: 10,
-  },
-  actionFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 15,
-  },
-  assignedBy: {
     fontSize: 12,
-    color: '#7f8c8d',
-    flex: 1,
+    color: '#6c757d',
   },
-  dueDate: {
-    fontSize: 12,
-    color: '#e67e22',
-    fontWeight: 'bold',
-  },
-  actionButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  completeButton: {
-    backgroundColor: '#27ae60',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    flex: 1,
-    marginRight: 5,
-    alignItems: 'center',
-  },
-  editButton: {
-    backgroundColor: '#95a5a6',
-    borderRadius: 8,
-    paddingVertical: 8,
-    paddingHorizontal: 15,
-    flex: 1,
-    marginLeft: 5,
-    alignItems: 'center',
-  },
-  reportCard: {
-    backgroundColor: '#fff',
+  incidentCard: {
+    backgroundColor: 'white',
     borderRadius: 12,
-    padding: 20,
-    marginBottom: 15,
+    padding: 16,
+    marginBottom: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
   },
-  reportTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 15,
-  },
-  statsGrid: {
+  incidentHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  statCard: {
     alignItems: 'center',
-    flex: 1,
+    marginBottom: 12,
   },
-  statNumber: {
+  incidentIcon: {
+    marginRight: 12,
+  },
+  incidentTypeIcon: {
     fontSize: 24,
-    fontWeight: 'bold',
-    color: '#e67e22',
-    marginBottom: 5,
   },
-  statCategory: {
-    fontSize: 11,
-    color: '#7f8c8d',
-    textAlign: 'center',
-  },
-  effectivenessStats: {
-    flexDirection: 'column',
-  },
-  effectivenessItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ecf0f1',
-  },
-  effectivenessLabel: {
-    fontSize: 14,
-    color: '#7f8c8d',
-  },
-  effectivenessValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-  },
-  trendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#ecf0f1',
-  },
-  trendIcon: {
-    fontSize: 20,
-    marginRight: 15,
-  },
-  trendContent: {
+  incidentContent: {
     flex: 1,
   },
-  trendText: {
-    fontSize: 14,
-    color: '#2c3e50',
-    marginBottom: 5,
-  },
-  trendType: {
-    fontSize: 12,
-    color: '#7f8c8d',
-    fontWeight: '500',
-  },
-  exportSection: {
-    marginTop: 20,
-    alignItems: 'center',
-  },
-  exportButton: {
-    backgroundColor: '#e67e22',
-    borderRadius: 8,
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    alignItems: 'center',
-  },
-  exportButtonText: {
-    color: '#fff',
+  incidentStudent: {
     fontSize: 16,
-    fontWeight: 'bold',
+    fontWeight: '600',
+    color: '#2c3e50',
   },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
+  incidentType: {
+    fontSize: 14,
+    color: '#6c757d',
+    marginTop: 2,
   },
-  modalContent: {
-    backgroundColor: '#fff',
+  severityBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
     borderRadius: 12,
-    padding: 30,
-    marginHorizontal: 40,
-    width: '90%',
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 20,
-    textAlign: 'center',
+  severityText: {
+    color: 'white',
+    fontSize: 10,
+    fontWeight: '600',
   },
-  modalInput: {
-    borderWidth: 1,
-    borderColor: '#ddd',
+  incidentActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  incidentActionButton: {
+    flex: 1,
+    backgroundColor: '#f8f9fa',
+    paddingVertical: 8,
     borderRadius: 8,
-    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#dee2e6',
+  },
+  incidentActionText: {
+    color: '#6c757d',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  trendsCard: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  trendsTitle: {
     fontSize: 16,
-    backgroundColor: '#fff',
-    marginBottom: 15,
+    fontWeight: '600',
+    color: '#2c3e50',
+    marginBottom: 12,
   },
-  textArea: {
-    height: 100,
-    textAlignVertical: 'top',
-  },
-  modalButtons: {
+  trendsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 20,
-  },
-  cancelButton: {
-    backgroundColor: '#95a5a6',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    flex: 1,
-    marginRight: 10,
     alignItems: 'center',
+    paddingVertical: 6,
   },
-  cancelButtonText: {
-    color: '#fff',
+  trendsLabel: {
+    fontSize: 14,
+    color: '#495057',
+  },
+  trendsValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  issueTypeRow: {
+    marginBottom: 12,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f3f4',
+  },
+  issueTypeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  issueTypeName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#2c3e50',
+  },
+  issueTypeCount: {
     fontSize: 16,
     fontWeight: 'bold',
+    color: '#c0392b',
   },
-  submitButton: {
-    backgroundColor: '#e67e22',
-    borderRadius: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    flex: 1,
-    marginLeft: 10,
+  issueTypeDetails: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  issueTypeDetail: {
+    fontSize: 12,
+    color: '#6c757d',
+  },
+  emptyState: {
     alignItems: 'center',
+    paddingVertical: 40,
   },
-  submitButtonText: {
-    color: '#fff',
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: 12,
+  },
+  emptyText: {
     fontSize: 16,
-    fontWeight: 'bold',
+    color: '#6c757d',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#adb5bd',
+    textAlign: 'center',
+  },
+  bottomPadding: {
+    height: 80, // Space for bottom navigation
   },
 });
 

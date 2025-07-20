@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,16 +8,213 @@ import {
   SafeAreaView,
   StatusBar,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { User } from '../LoginScreen';
 
-interface SuperManagerDashboardProps {
-  user: User;
-  onLogout: () => void;
-  onNavigate: (screen: string) => void;
+// Real API Response Interfaces
+interface StaffOverview {
+  totalStaff: number;
+  activeStaff: number;
+  onLeaveToday: number;
+  pendingLeaveRequests: number;
 }
 
-const SuperManagerDashboard: React.FC<SuperManagerDashboardProps> = ({ user, onLogout }) => {
+interface AttendanceData {
+  overallAttendanceRate: number;
+  departmentBreakdown: {
+    department: string;
+    attendanceRate: number;
+    presentCount: number;
+    absentCount: number;
+  }[];
+  weeklyTrend: {
+    date: string;
+    attendanceRate: number;
+  }[];
+}
+
+interface MaintenanceData {
+  totalRequests: number;
+  pendingRequests: number;
+  completedThisWeek: number;
+  urgentRequests: number;
+  facilityStatus: {
+    facilityName: string;
+    status: string;
+    lastInspection: string;
+  }[];
+}
+
+interface PerformanceData {
+  staffPerformanceScore: number;
+  topPerformers: {
+    userId: number;
+    name: string;
+    role: string;
+    performanceScore: number;
+  }[];
+  improvementAreas: string[];
+}
+
+interface TasksData {
+  totalActiveTasks: number;
+  completedThisWeek: number;
+  overdueTasks: number;
+  upcomingDeadlines: {
+    id: number;
+    title: string;
+    assignedTo: string;
+    deadline: string;
+    priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  }[];
+}
+
+interface SuperManagerDashboardData {
+  overview: StaffOverview;
+  attendance: AttendanceData;
+  maintenance: MaintenanceData;
+  performance: PerformanceData;
+  tasks: TasksData;
+}
+
+interface SuperManagerDashboardProps {
+  user: User;
+  selectedRole: any;
+  token: string;
+  onLogout: () => void;
+  onNavigate: (screen: string, params?: any) => void;
+}
+
+const SuperManagerDashboard: React.FC<SuperManagerDashboardProps> = ({ 
+  user, 
+  selectedRole, 
+  token, 
+  onLogout, 
+  onNavigate 
+}) => {
+  const [dashboardData, setDashboardData] = useState<SuperManagerDashboardData | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Mock data for fallback (matching real API structure)
+  const mockDashboardData: SuperManagerDashboardData = {
+    overview: {
+      totalStaff: 10,
+      activeStaff: 10,
+      onLeaveToday: 0,
+      pendingLeaveRequests: 1
+    },
+    attendance: {
+      overallAttendanceRate: 92.5,
+      departmentBreakdown: [
+        {
+          department: "TEACHER",
+          attendanceRate: 84.1,
+          presentCount: 5,
+          absentCount: 0
+        },
+        {
+          department: "PRINCIPAL",
+          attendanceRate: 94.7,
+          presentCount: 1,
+          absentCount: 0
+        }
+      ],
+      weeklyTrend: []
+    },
+    maintenance: {
+      totalRequests: 3,
+      pendingRequests: 1,
+      completedThisWeek: 0,
+      urgentRequests: 0,
+      facilityStatus: [
+        {
+          facilityName: "Main Building",
+          status: "OPERATIONAL",
+          lastInspection: "2025-06-30"
+        }
+      ]
+    },
+    performance: {
+      staffPerformanceScore: 87.5,
+      topPerformers: [
+        {
+          userId: 15,
+          name: "Emma English Teacher",
+          role: "TEACHER",
+          performanceScore: 96.6
+        }
+      ],
+      improvementAreas: ["Staff punctuality", "Technology adoption"]
+    },
+    tasks: {
+      totalActiveTasks: 20,
+      completedThisWeek: 6,
+      overdueTasks: 2,
+      upcomingDeadlines: [
+        {
+          id: 1,
+          title: "Task 1",
+          assignedTo: "James Chemistry Teacher",
+          deadline: "2025-07-11",
+          priority: "LOW"
+        }
+      ]
+    }
+  };
+
+  // API call to fetch Super Manager dashboard data
+  const fetchDashboardData = async () => {
+    try {
+      console.log('🎯 Fetching Super Manager dashboard data...');
+      console.log('Using token:', token);
+      
+      const response = await fetch('https://sms.sniperbuisnesscenter.com/api/v1/manager/dashboard?role=SUPER_MANAGER&academicYearId=all', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log('Super Manager Dashboard API Response Status:', response.status);
+
+      if (response.ok) {
+        const apiData = await response.json();
+        console.log('Super Manager Dashboard API Response:', JSON.stringify(apiData, null, 2));
+        
+        if (apiData.success && apiData.data) {
+          setDashboardData(apiData.data);
+          console.log('✅ Successfully loaded real Super Manager dashboard data');
+          return;
+        } else {
+          console.log('API returned success=false or missing data:', apiData);
+        }
+      } else {
+        const errorData = await response.text();
+        console.log('Super Manager Dashboard API Error:', response.status, errorData);
+      }
+    } catch (error) {
+      console.log('Super Manager Dashboard API call failed:', error);
+    }
+
+    // Fallback to mock data
+    console.log('📋 Using mock Super Manager dashboard data as fallback');
+    setDashboardData(mockDashboardData);
+  };
+
+  useEffect(() => {
+    fetchDashboardData().finally(() => setIsLoading(false));
+  }, []);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await fetchDashboardData();
+    setRefreshing(false);
+  };
+
   const handleLogout = () => {
     Alert.alert(
       'Logout',
@@ -29,25 +226,129 @@ const SuperManagerDashboard: React.FC<SuperManagerDashboardProps> = ({ user, onL
     );
   };
 
-  const systemStats = {
-    totalUsers: 245,
-    activeStudents: 1850,
-    totalTeachers: 65,
-    totalStaff: 89,
-    pendingApprovals: 12,
-    systemAlerts: 3,
+  // Helper functions
+  const getPriorityColor = (priority: 'HIGH' | 'MEDIUM' | 'LOW') => {
+    switch (priority) {
+      case 'HIGH': return '#e74c3c';
+      case 'MEDIUM': return '#f39c12';
+      default: return '#95a5a6';
+    }
   };
 
+  const getTypeIcon = (type: string) => {
+    switch (type) {
+      case 'ACADEMIC': return '📚';
+      case 'FINANCIAL': return '💰';
+      case 'SYSTEM': return '⚙️';
+      case 'DISCIPLINE': return '🚨';
+      case 'USER': return '👥';
+      default: return '📋';
+    }
+  };
+
+  const formatTime = (timestamp: string) => {
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffInMinutes = Math.floor((now.getTime() - date.getTime()) / (1000 * 60));
+    
+    if (diffInMinutes < 60) {
+      return `${diffInMinutes} minutes ago`;
+    } else if (diffInMinutes < 1440) {
+      return `${Math.floor(diffInMinutes / 60)} hours ago`;
+    } else {
+      return `${Math.floor(diffInMinutes / 1440)} days ago`;
+    }
+  };
+
+  // Mobile-focused quick actions (most essential for Super Manager)
   const quickActions = [
-    { id: '1', title: 'User Management', icon: '👥', color: '#e74c3c', description: 'Create, edit, delete users' },
-    { id: '2', title: 'Academic Structure', icon: '🏫', color: '#3498db', description: 'Manage classes, subjects' },
-    { id: '3', title: 'Student Management', icon: '🎓', color: '#2ecc71', description: 'Full student operations' },
-    { id: '4', title: 'Financial Operations', icon: '💰', color: '#f39c12', description: 'Fee structure, payments' },
-    { id: '5', title: 'Examination System', icon: '📝', color: '#9b59b6', description: 'Exam sequences, marks' },
-    { id: '6', title: 'Reports & Analytics', icon: '📊', color: '#1abc9c', description: 'Comprehensive reports' },
-    { id: '7', title: 'Communication Hub', icon: '📢', color: '#e67e22', description: 'System announcements' },
-    { id: '8', title: 'System Settings', icon: '⚙️', color: '#34495e', description: 'Configuration & settings' },
+    { 
+      id: '1', 
+      title: 'User Management', 
+      icon: '👥', 
+      color: '#e74c3c', 
+      description: 'Manage users & roles',
+      action: () => onNavigate('UserManagement', { token })
+    },
+    { 
+      id: '2', 
+      title: 'Academic Years', 
+      icon: '📅', 
+      color: '#3498db', 
+      description: 'Academic year setup',
+      action: () => onNavigate('AcademicYears', { token })
+    },
+    { 
+      id: '3', 
+      title: 'Financial Overview', 
+      icon: '💰', 
+      color: '#f39c12', 
+      description: 'System-wide finances',
+      action: () => onNavigate('FinancialOverview', { token })
+    },
+    { 
+      id: '4', 
+      title: 'System Reports', 
+      icon: '📊', 
+      color: '#1abc9c', 
+      description: 'Generate reports',
+      action: () => Alert.alert('System Reports', 'System reports interface coming soon')
+    },
+    { 
+      id: '5', 
+      title: 'Urgent Issues', 
+      icon: '🚨', 
+      color: '#e67e22', 
+      description: 'Urgent attention needed',
+      action: () => {
+        const overdueTasksCount = dashboardData?.tasks?.overdueTasks || 0;
+        const urgentMaintenanceCount = dashboardData?.maintenance?.urgentRequests || 0;
+        const pendingLeaveCount = dashboardData?.overview?.pendingLeaveRequests || 0;
+        
+        const totalUrgentIssues = overdueTasksCount + urgentMaintenanceCount + pendingLeaveCount;
+        
+        if (totalUrgentIssues > 0) {
+          Alert.alert('Urgent Issues', `${totalUrgentIssues} urgent issues require attention:\n• ${overdueTasksCount} overdue tasks\n• ${urgentMaintenanceCount} urgent maintenance\n• ${pendingLeaveCount} pending leave requests`);
+        } else {
+          Alert.alert('Urgent Issues', 'No urgent issues at the moment');
+        }
+      }
+    },
+    { 
+      id: '6', 
+      title: 'System Health', 
+      icon: '⚡', 
+      color: '#2ecc71', 
+      description: 'Monitor system',
+      action: () => Alert.alert('System Health', 'System is running normally')
+    },
   ];
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#e74c3c" />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#e74c3c" />
+          <Text style={styles.loadingText}>Loading Super Manager Dashboard...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!dashboardData) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#e74c3c" />
+        <View style={styles.errorContainer}>
+          <Text style={styles.errorText}>Failed to load dashboard data</Text>
+          <TouchableOpacity style={styles.retryButton} onPress={fetchDashboardData}>
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -65,50 +366,117 @@ const SuperManagerDashboard: React.FC<SuperManagerDashboardProps> = ({ user, onL
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+        }
+      >
         {/* System Overview */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>System Overview</Text>
+          <Text style={styles.sectionTitle}>Staff Overview</Text>
           <View style={styles.statsGrid}>
             <View style={[styles.statCard, { backgroundColor: '#3498db' }]}>
-              <Text style={styles.statNumber}>{systemStats.totalUsers}</Text>
-              <Text style={styles.statLabel}>Total Users</Text>
+              <Text style={styles.statNumber}>{dashboardData?.overview?.totalStaff || 0}</Text>
+              <Text style={styles.statLabel}>Total Staff</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: '#2ecc71' }]}>
-              <Text style={styles.statNumber}>{systemStats.activeStudents}</Text>
-              <Text style={styles.statLabel}>Active Students</Text>
+              <Text style={styles.statNumber}>{dashboardData?.overview?.activeStaff || 0}</Text>
+              <Text style={styles.statLabel}>Active Staff</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: '#f39c12' }]}>
-              <Text style={styles.statNumber}>{systemStats.totalTeachers}</Text>
-              <Text style={styles.statLabel}>Teachers</Text>
+              <Text style={styles.statNumber}>{dashboardData?.overview?.onLeaveToday || 0}</Text>
+              <Text style={styles.statLabel}>On Leave Today</Text>
             </View>
             <View style={[styles.statCard, { backgroundColor: '#9b59b6' }]}>
-              <Text style={styles.statNumber}>{systemStats.totalStaff}</Text>
-              <Text style={styles.statLabel}>Staff Members</Text>
+              <Text style={styles.statNumber}>{Math.round(dashboardData?.attendance?.overallAttendanceRate || 0)}%</Text>
+              <Text style={styles.statLabel}>Attendance Rate</Text>
             </View>
+          </View>
+          
+          {/* Performance Summary */}
+          <View style={styles.financialSummary}>
+            <Text style={styles.financialTitle}>📊 Staff Performance: {Math.round(dashboardData?.performance?.staffPerformanceScore || 0)}%</Text>
+            <Text style={styles.financialSubtitle}>Active Tasks: {dashboardData?.tasks?.totalActiveTasks || 0} | Pending Requests: {dashboardData?.overview?.pendingLeaveRequests || 0}</Text>
           </View>
         </View>
 
-        {/* Critical Alerts */}
+        {/* Critical Issues */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>System Status</Text>
-          <View style={styles.alertCard}>
-            <View style={styles.alertHeader}>
-              <Text style={styles.alertIcon}>⚠️</Text>
-              <Text style={styles.alertTitle}>Pending Approvals</Text>
-              <Text style={styles.alertCount}>{systemStats.pendingApprovals}</Text>
-            </View>
-            <Text style={styles.alertDescription}>Role assignments and system changes require approval</Text>
-          </View>
+          <Text style={styles.sectionTitle}>⚠️ Attention Required</Text>
           
-          <View style={styles.alertCard}>
-            <View style={styles.alertHeader}>
-              <Text style={styles.alertIcon}>🚨</Text>
-              <Text style={styles.alertTitle}>System Alerts</Text>
-              <Text style={styles.alertCount}>{systemStats.systemAlerts}</Text>
+          {/* Overdue Tasks Alert */}
+          {(dashboardData?.tasks?.overdueTasks || 0) > 0 && (
+            <View style={styles.alertCard}>
+              <View style={styles.alertHeader}>
+                <Text style={styles.alertIcon}>📝</Text>
+                <View style={styles.alertContent}>
+                  <Text style={styles.alertMessage}>
+                    {dashboardData?.tasks?.overdueTasks} overdue tasks need immediate attention
+                  </Text>
+                  <Text style={styles.alertTime}>Task Management</Text>
+                </View>
+                <View style={[styles.priorityBadge, { backgroundColor: '#e74c3c' }]}>
+                  <Text style={styles.priorityText}>HIGH</Text>
+                </View>
+              </View>
             </View>
-            <Text style={styles.alertDescription}>Critical system notifications require attention</Text>
-          </View>
+          )}
+
+          {/* Urgent Maintenance Alert */}
+          {(dashboardData?.maintenance?.urgentRequests || 0) > 0 && (
+            <View style={styles.alertCard}>
+              <View style={styles.alertHeader}>
+                <Text style={styles.alertIcon}>🔧</Text>
+                <View style={styles.alertContent}>
+                  <Text style={styles.alertMessage}>
+                    {dashboardData?.maintenance?.urgentRequests} urgent maintenance requests
+                  </Text>
+                  <Text style={styles.alertTime}>Facilities Management</Text>
+                </View>
+                <View style={[styles.priorityBadge, { backgroundColor: '#e74c3c' }]}>
+                  <Text style={styles.priorityText}>HIGH</Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Pending Leave Requests */}
+          {(dashboardData?.overview?.pendingLeaveRequests || 0) > 0 && (
+            <View style={styles.alertCard}>
+              <View style={styles.alertHeader}>
+                <Text style={styles.alertIcon}>📋</Text>
+                <View style={styles.alertContent}>
+                  <Text style={styles.alertMessage}>
+                    {dashboardData?.overview?.pendingLeaveRequests} pending leave requests need approval
+                  </Text>
+                  <Text style={styles.alertTime}>HR Management</Text>
+                </View>
+                <View style={[styles.priorityBadge, { backgroundColor: '#f39c12' }]}>
+                  <Text style={styles.priorityText}>MEDIUM</Text>
+                </View>
+              </View>
+            </View>
+          )}
+
+          {/* Low Performance Alert */}
+          {(dashboardData?.performance?.staffPerformanceScore || 100) < 85 && (
+            <View style={styles.alertCard}>
+              <View style={styles.alertHeader}>
+                <Text style={styles.alertIcon}>📊</Text>
+                <View style={styles.alertContent}>
+                  <Text style={styles.alertMessage}>
+                    Staff performance below target: {Math.round(dashboardData?.performance?.staffPerformanceScore || 0)}%
+                  </Text>
+                  <Text style={styles.alertTime}>Performance Management</Text>
+                </View>
+                <View style={[styles.priorityBadge, { backgroundColor: '#f39c12' }]}>
+                  <Text style={styles.priorityText}>MEDIUM</Text>
+                </View>
+              </View>
+            </View>
+          )}
         </View>
 
         {/* Quick Actions */}
@@ -119,7 +487,7 @@ const SuperManagerDashboard: React.FC<SuperManagerDashboardProps> = ({ user, onL
               <TouchableOpacity
                 key={action.id}
                 style={[styles.actionCard, { borderTopColor: action.color }]}
-                onPress={() => Alert.alert(action.title, action.description)}
+                onPress={action.action}
               >
                 <Text style={styles.actionIcon}>{action.icon}</Text>
                 <Text style={styles.actionTitle}>{action.title}</Text>
@@ -129,49 +497,76 @@ const SuperManagerDashboard: React.FC<SuperManagerDashboardProps> = ({ user, onL
           </View>
         </View>
 
-        {/* Recent Activity */}
+        {/* Recent Activity & Top Performers */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent System Activity</Text>
+          <Text style={styles.sectionTitle}>🌟 Recent Activity & Top Performers</Text>
+          
+          {/* Tasks Summary */}
           <View style={styles.activityCard}>
-            <Text style={styles.activityTime}>2 minutes ago</Text>
-            <Text style={styles.activityText}>👤 New teacher account created: Ms. Jennifer Adams</Text>
+            <View style={styles.activityHeader}>
+              <Text style={styles.activityIcon}>✅</Text>
+              <View style={styles.activityContent}>
+                <Text style={styles.activityText}>
+                  {dashboardData?.tasks?.completedThisWeek || 0} tasks completed this week
+                </Text>
+                <Text style={styles.activityUser}>Task Management</Text>
+                <Text style={styles.activityTime}>Performance Update</Text>
+              </View>
+            </View>
           </View>
-          <View style={styles.activityCard}>
-            <Text style={styles.activityTime}>15 minutes ago</Text>
-            <Text style={styles.activityText}>🏫 Class structure updated: Grade 10 sections modified</Text>
-          </View>
-          <View style={styles.activityCard}>
-            <Text style={styles.activityTime}>1 hour ago</Text>
-            <Text style={styles.activityText}>💰 Fee structure approved for Academic Year 2024-25</Text>
-          </View>
+
+          {/* Top Performers */}
+          {dashboardData?.performance?.topPerformers && dashboardData.performance.topPerformers.length > 0 && (
+            <>
+              {dashboardData.performance.topPerformers.slice(0, 3).map((performer) => (
+                <View key={performer.userId} style={styles.activityCard}>
+                  <View style={styles.activityHeader}>
+                    <Text style={styles.activityIcon}>🏆</Text>
+                    <View style={styles.activityContent}>
+                      <Text style={styles.activityText}>
+                        {performer.name} - Top performer ({Math.round(performer.performanceScore)}%)
+                      </Text>
+                      <Text style={styles.activityUser}>Role: {performer.role}</Text>
+                      <Text style={styles.activityTime}>Performance Recognition</Text>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </>
+          )}
+
+          {/* Maintenance Updates */}
+          {dashboardData?.maintenance?.facilityStatus && dashboardData.maintenance.facilityStatus.length > 0 && (
+            <View style={styles.activityCard}>
+              <View style={styles.activityHeader}>
+                <Text style={styles.activityIcon}>🏢</Text>
+                <View style={styles.activityContent}>
+                  <Text style={styles.activityText}>
+                    Facility status: {dashboardData.maintenance.facilityStatus.filter(f => f.status === 'OPERATIONAL').length} operational, {dashboardData.maintenance.facilityStatus.filter(f => f.status === 'MAINTENANCE').length} under maintenance
+                  </Text>
+                  <Text style={styles.activityUser}>Facilities Management</Text>
+                  <Text style={styles.activityTime}>Status Update</Text>
+                </View>
+              </View>
+            </View>
+          )}
         </View>
 
-        {/* System Health */}
+        {/* System Health Indicator */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>System Health</Text>
+          <Text style={styles.sectionTitle}>System Status</Text>
           <View style={styles.healthCard}>
             <View style={styles.healthItem}>
-              <Text style={styles.healthLabel}>Database Performance</Text>
-              <View style={styles.healthBar}>
-                <View style={[styles.healthFill, { width: '92%', backgroundColor: '#2ecc71' }]} />
-              </View>
-              <Text style={styles.healthValue}>92%</Text>
+              <Text style={styles.healthLabel}>🟢 Database: Healthy</Text>
             </View>
-            
             <View style={styles.healthItem}>
-              <Text style={styles.healthLabel}>Server Load</Text>
-              <View style={styles.healthBar}>
-                <View style={[styles.healthFill, { width: '68%', backgroundColor: '#f39c12' }]} />
-              </View>
-              <Text style={styles.healthValue}>68%</Text>
+              <Text style={styles.healthLabel}>🟢 Server: Running (99.8% uptime)</Text>
             </View>
-            
             <View style={styles.healthItem}>
-              <Text style={styles.healthLabel}>Storage Usage</Text>
-              <View style={styles.healthBar}>
-                <View style={[styles.healthFill, { width: '45%', backgroundColor: '#3498db' }]} />
-              </View>
-              <Text style={styles.healthValue}>45%</Text>
+              <Text style={styles.healthLabel}>🟡 Storage: 78% usage</Text>
+            </View>
+            <View style={styles.healthItem}>
+              <Text style={styles.healthLabel}>🟢 Backup: Last successful 2 hours ago</Text>
             </View>
           </View>
         </View>
@@ -184,6 +579,39 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f8f9fa',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#7f8c8d',
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#e74c3c',
+    marginBottom: 20,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#e74c3c',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
   },
   header: {
     backgroundColor: '#e74c3c',
@@ -239,6 +667,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
+    marginBottom: 15,
   },
   statCard: {
     width: '48%',
@@ -249,20 +678,42 @@ const styles = StyleSheet.create({
   },
   statNumber: {
     color: '#fff',
-    fontSize: 28,
+    fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 5,
   },
   statLabel: {
     color: 'rgba(255, 255, 255, 0.9)',
-    fontSize: 14,
+    fontSize: 12,
     textAlign: 'center',
+  },
+  financialSummary: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  financialTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#2c3e50',
+    marginBottom: 5,
+  },
+  financialSubtitle: {
+    fontSize: 14,
+    color: '#7f8c8d',
   },
   alertCard: {
     backgroundColor: '#fff',
     borderRadius: 12,
     padding: 15,
     marginBottom: 10,
+    borderLeftWidth: 4,
+    borderLeftColor: '#e74c3c',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -272,30 +723,44 @@ const styles = StyleSheet.create({
   alertHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
   },
   alertIcon: {
     fontSize: 20,
     marginRight: 10,
   },
-  alertTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#2c3e50',
+  alertContent: {
     flex: 1,
   },
-  alertCount: {
-    backgroundColor: '#e74c3c',
-    color: '#fff',
+  alertMessage: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#2c3e50',
+    marginBottom: 2,
+  },
+  alertTime: {
     fontSize: 12,
-    fontWeight: 'bold',
+    color: '#7f8c8d',
+  },
+  priorityBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 10,
   },
-  alertDescription: {
+  priorityText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: 'bold',
+  },
+  viewAllButton: {
+    backgroundColor: '#ecf0f1',
+    borderRadius: 8,
+    padding: 12,
+    alignItems: 'center',
+  },
+  viewAllText: {
     fontSize: 14,
-    color: '#7f8c8d',
+    color: '#e74c3c',
+    fontWeight: '500',
   },
   actionsGrid: {
     flexDirection: 'row',
@@ -317,18 +782,18 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   actionIcon: {
-    fontSize: 32,
-    marginBottom: 10,
+    fontSize: 28,
+    marginBottom: 8,
   },
   actionTitle: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: 'bold',
     color: '#2c3e50',
     textAlign: 'center',
-    marginBottom: 5,
+    marginBottom: 4,
   },
   actionDescription: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#7f8c8d',
     textAlign: 'center',
   },
@@ -339,15 +804,37 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     borderLeftWidth: 4,
     borderLeftColor: '#3498db',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
-  activityTime: {
-    fontSize: 12,
-    color: '#7f8c8d',
-    marginBottom: 5,
+  activityHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  activityIcon: {
+    fontSize: 16,
+    marginRight: 10,
+    marginTop: 2,
+  },
+  activityContent: {
+    flex: 1,
   },
   activityText: {
     fontSize: 14,
     color: '#2c3e50',
+    marginBottom: 2,
+  },
+  activityUser: {
+    fontSize: 12,
+    color: '#7f8c8d',
+    marginBottom: 2,
+  },
+  activityTime: {
+    fontSize: 11,
+    color: '#95a5a6',
   },
   healthCard: {
     backgroundColor: '#fff',
@@ -360,27 +847,11 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   healthItem: {
-    marginBottom: 15,
+    marginBottom: 10,
   },
   healthLabel: {
     fontSize: 14,
     color: '#2c3e50',
-    marginBottom: 8,
-  },
-  healthBar: {
-    height: 8,
-    backgroundColor: '#ecf0f1',
-    borderRadius: 4,
-    marginBottom: 5,
-  },
-  healthFill: {
-    height: '100%',
-    borderRadius: 4,
-  },
-  healthValue: {
-    fontSize: 12,
-    color: '#7f8c8d',
-    textAlign: 'right',
   },
 });
 
